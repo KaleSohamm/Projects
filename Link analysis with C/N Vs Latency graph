@@ -1,0 +1,152 @@
+clc
+clear
+
+Altitude=[2000, 5000,10972.8]; 
+
+for j=1:length(Altitude)
+    k=-228.6;            % Boltzman constant (dbW/K/Hz)
+    c=3e8;               % speed of light (m/s)
+    Re=6371e3;           % radius of Earth (m)
+    T_0 = 288.15;        % Standard temperature (K)
+    P_0 = 1013.25;       % standard pressure (hpa)
+    P_0_water = 7.5;     % Water vapour density
+    h_0_water = 2000;    % the scale height h0 = 2 km
+    f=30e9;              % Standard Ka Band frequency
+    tB= 1e9;             % Bandwidth 1 GHz
+    tD=0.46;             % Antenna diameter
+    tEIRP=57.7;          % Equivalent Isotropic Radiated Power (dB)
+    tGoverT=16.1;        % Antenna gain 
+    tae=0.7;             % Antenna efficiency is assumed  
+    t= [0:7:85];         % Elevation angle (degrees)
+    Altp=Altitude(j);    % Altitude value of plane from the array
+    Altp1 = Altp/1000;   % Altitude conversion in Km
+    dr=50e6;             % Data rate (from datasheet)
+    plat = [23.9665814 27.7883062 31.3796701 35.0549586 38.5032585 42.1208411 45.9723438 50.4769109 55.8574192 59.7403313 63.4558992 68.3302232 71.6877592 74.4463419 76.5551281 78.225169]; % Latitude from Egypt to Norway
+    plong = [32.824464 26.1784033 22.2233252 18.7955908 15.9830908 3.5221533 11.5885596 10.0065283 8.9376531 7.9708562 7.4435125  8.1737023 9.2283898 10.6346398 12.7440148 15.6358633]; % Longitude from Egypt to Norway
+    slat= 0;             % Satellite Latitude https://www.satbeams.com/satellites?norad=44801
+    slong= 11.02;        % Satellite Longitude https://www.satbeams.com/satellites?norad=44801
+    H= 35786e3;          % Geostationary Earth Orbit's height
+
+    rG=49.8293;          % Antenna gain                 
+    rf=19.45e9;           % Frequency of receiver
+
+ans_Type = 1;
+if ans_Type == 1
+    for i = 1:length(plat)
+        K = cosd(plong(i))*cosd(plat(i)) - cosd(slong)*cosd(slat);
+        L = cosd(plong(i))*sind(plat(i)) - cosd(slong)*sind(slat);
+        M = sind(plong(i)) - sind(slong);        
+        AircraftGround_to_SatGround2(i) = sqrt((K)^2+(L)^2+(M)^2) * 6378000; 
+        AngleGround_Chord(i) = atand(Altp/AircraftGround_to_SatGround2(i));
+        Angle_Sat_SatGround_Plane = 90-AngleGround_Chord;
+        Plane_SatGroundLength(i) = sqrt((AircraftGround_to_SatGround2(i))^2 + (Altp)^2);       
+        Plane_Satallite_Length(i) = sqrt( Plane_SatGroundLength(i)^2 + H^2 - 2*H*Plane_SatGroundLength(i)*cosd(Angle_Sat_SatGround_Plane(i)))
+        e(i) = (H*sind(Angle_Sat_SatGround_Plane))/Plane_Satallite_Length;
+        e(i) = asind(e(i));
+        %lambda = lat
+        %theta = long
+        rEIRP(i) = e(i)*0.0714 + 45.071;
+    end
+
+Antenna_ip_power = 175;                                                          % Antenna i/p power
+w=c/f;                                                                           % Wavelength 
+tG= (20*log10(pi))+(20*log10(tD))+(20*log10(f))+(10*log10(tae))-(20*log10(c));   %transmitter antenna gain (dBW)
+rD = 0.813;                                                                      %Rx Antenna Diameter
+rG= (20*log10(pi))+(20*log10(rD))+(20*log10(f))+(10*log10(tae))-(20*log10(c));   %transmitter antenna gain (dBW)
+tP=tEIRP-tG;                                                                     % i/p power to antenna
+rSl= 0.1*3;                                                                      % Coupling loss (Assumed)
+
+for i = 1:length(plat)    
+    fspl(i)= (20*log10((4*pi/c)))+(20*log10(Plane_Satallite_Length(i)))+(20*log10(f)); % Free Space Path Loss
+end
+
+aa=0.1;                                                                         % Atmospheric Absorption
+% Atmospheric Attenuation (by rain)
+if ~exist('ITURDigitalMaps.tar.gz','file')
+    url = 'https://www.mathworks.com/supportfiles/spc/P618/ITURDigitalMaps.tar.gz';
+    websave('ITURDigitalMaps.tar.gz',url);
+    untar('ITURDigitalMaps.tar.gz');
+end
+
+Atat=[];
+skyT=[];
+cfg=p618Config;
+cfg.Frequency=f;
+cfg.TotalAnnualExceedance=0.001;
+cfg.AntennaEfficiency=0.68;
+
+for i=1:numel(e)
+    cfg.ElevationAngle=e(i);
+    cfg.Latitude=plat(i);
+    cfg.Longitude=plong(i);
+    disp("Entered 1st Forloop")
+    [pl,xpd,tsky]=p618PropagationLosses(cfg,'StationHeight',(Altp1),'WaterVaporDensity',0,'Pressure',7,'Temperature',216.7, 'TotalColumnarContent',1.4,'RainRate',1);
+    atat=pl.At; %output atmospheric attenuation 
+    Atat=[Atat,atat]; %fills a 1D array with the attenuation values for each run of the loop
+    skyT=[skyT,tsky]; %fills a 1D array with the SkyTemperatures at each run of the loop, so I can calcluate the noise power
+    %skyT = 290;
+end
+
+% Noise Power
+rNT=55+273.15;                                    %Reciever noise temperature
+for i = 1:length(plat)
+    nP(i)=(k)+(10*log10(skyT(i)))+(10*log10(tB)); % noise power in dbW
+end
+
+% Reciever power
+
+for i = 1:length(plat)
+    rPdB(i)=tEIRP+rEIRP(i)-fspl(i)-Atat(i)-aa;    %Reciever power in dB
+    rP(i)=10.^(rPdB(i)/10);                       %Reciever power in W
+end
+
+% C over N, power to noise ratio
+
+for i = 1:length(plat)
+    CoverN(i)= rPdB(i)-nP(i);
+    Array_CoverN(j,i) = (CoverN(i));
+end 
+
+for i = 1:length(plat)
+    L(i)=Plane_Satallite_Length(i)/c ;
+    Array_Latency_vs_PlaneAltitude(j,i) = (L(i));
+end
+end
+end
+
+%% Plots 
+
+figure()
+ylim([8 16]);
+
+title(['C/N variation with changing latitude' ...
+    ' (Domain, Egypt - Norway flightpath)'])
+xlabel('latitude position of Aircraft (degrees)')
+ylabel('C/N (dB)') 
+grid on
+grid minor 
+hold on
+%y=zeros(length(plat));
+plot(plat,Array_CoverN(1,:),'r')
+plot(plat,Array_CoverN(2,:),'g')
+plot(plat,Array_CoverN(3,:),'b')
+
+legend('2km','5km','11km')
+hold off
+
+%% latency
+figure()
+title(['Latency against Latitude @ flight altitude 2km, 5km, and 11km '])
+xlabel('latitude position of Aircraft (degrees)') 
+ylabel('Latency (s)') 
+grid on
+grid minor
+hold on
+%y=zeros(length(plat));
+plot(plat,Array_Latency_vs_PlaneAltitude(1,:),'r')
+plot(plat,Array_Latency_vs_PlaneAltitude(2,:),'g')
+plot(plat,Array_Latency_vs_PlaneAltitude(3,:),'b')
+
+legend('2km','5km','11km')
+hold off
+ 
