@@ -1,0 +1,19 @@
+
+AN = reflectorCircular('GroundPlaneRadius',0.30, 'Spacing', 0.1);
+figure(1)
+show(AN)
+freq = linspace(29e9,30e9,1000)
+figure;
+% impedance(AN,freq)
+% freq = 3000e6;
+% figure(2)
+% pattern(AN, freq)
+% figure(3)
+% patternElevation(AN, freq)
+% figure(4)
+% patternAzimuth(AN, freq)
+% figure(5)
+% charge(AN, freq)
+% directivity = pattern(AN, freq, 0, 90);
+% disp("The directivity of antenna between 0 to 90 is given by:")
+% disp(directivity)
